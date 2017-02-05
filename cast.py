@@ -1,34 +1,9 @@
+import argparse
 import pychromecast
 import requests
 import sys
 from random import shuffle
 from time import sleep
-
-
-VOLUME_MIN = 0.05
-VOLUME_MAX = 0.4
-
-# Gradually increase or decrease the volume.
-VOLUME_INCREASE = True
-
-# Intervals of volume increase/decrease
-VOLUME_INTERVALS = 10
-
-# Total duration of playback
-TIMER = 3600
-
-TARGET = 'Home group'
-STREAMS = [
-    'http://streaming214.radionomy.com/1000ClassicalHits',
-    'http://streaming213.radionomy.com/1000HITSClassicalMusic',
-    'http://streaming202.radionomy.com/1000HITSClassicalMusic',
-    'http://streaming208.radionomy.com:80/1000HITSClassicalMusic',
-    'http://stream-mp3-hd2.intellis.usf.edu:8064/listen',
-    'http://streaming213.radionomy.com:80/ABC-Piano',
-    'http://streaming202.radionomy.com:80/ABC-Piano',
-    'http://streaming208.radionomy.com:80/ABC-Piano',
-    'http://streaming210.radionomy.com:80/ABC-Piano',
-]
 
 
 def get_device(chromecasts, name):
@@ -45,68 +20,151 @@ def send_stream(device, audiostream):
     return mc
 
 
-def pick_stream():
-    shuffle(STREAMS)
-    for s in STREAMS:
+def pick_stream(streams):
+    shuffle(streams)
+    for s in streams:
         if requests.head(s).ok:
             print('Using stream: {}'.format(s))
             return s
     return False
 
 
-def volume_control(device, volume):
-    step = 0
-    while step < VOLUME_INTERVALS:
-        sleep(TIMER / VOLUME_INTERVALS)
-
-        if VOLUME_INCREASE:
-            volume += (VOLUME_MAX - VOLUME_MIN)/VOLUME_INTERVALS
-        else:
-            volume -= (VOLUME_MAX - VOLUME_MIN)/VOLUME_INTERVALS
-
-        print('Adjusting volume to "{}".'.format(round(volume, 3)))
-        device.set_volume(volume)
-        step += 1
-
-
 def list_chromecasts(chromecasts):
     for cast in chromecasts:
-        print('{} ({})'.format(cast.device.friendly_name, cast.device.model_name))
+        print('"{}" ({})'.format(
+            cast.device.friendly_name,
+            cast.device.model_name)
+        )
 
 
 def main():
-    chromecasts = pychromecast.get_chromecasts()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-l", "--list",
+        help="List the Chromecasts on the network",
+        action="store_true"
+    )
 
-    device = get_device(chromecasts, TARGET)
-    if not device:
-        print('Device "{}" not found'.format(TARGET))
-        sys.exit(1)
+    parser.add_argument(
+        "-p", "--play",
+        help="Play a feed on a Chromecast device",
+        action="store_true"
+    )
 
-    stream = pick_stream()
-    if not stream:
-        print('No valid stream found')
+    parser.add_argument(
+        "--target",
+        help="The target speakers of your feed. This can be a group or an individual device.",
+    )
 
-    print('Found device "{}".'.format(TARGET))
+    parser.add_argument(
+        "--streams",
+        help="Specify one ore multiple streams. Must be a HTTP/HTTPS stream. Use a comma separated list for multiple feeds.",
+    )
 
-    if VOLUME_INCREASE:
-        volume = VOLUME_MIN
+    parser.add_argument(
+        "-r", "--reset_volume_on_speakers",
+        help="Force volume reset on individual speakers. Use a comma separated list or multiple speakers.",
+    )
+
+    parser.add_argument(
+        "--timer",
+        help="The time in seconds before the feed is stopped. Default is one hour.",
+        type=int,
+        default=3600,
+    )
+
+    parser.add_argument(
+        "--volume_start",
+        help="The start volume. Default is 0.1.",
+        type=int,
+        default=0.1,
+    )
+
+    parser.add_argument(
+        "--volume_end",
+        help="The end volume. Default is 0.4",
+        type=int,
+        default=0.4,
+    )
+
+    parser.add_argument(
+        "--volume_intervals",
+        help="The number of volume 'steps' between start and end volume. Default is 10.",
+        type=int,
+        default=10,
+    )
+
+    args = parser.parse_args()
+
+    if args.list:
+        chromecasts = pychromecast.get_chromecasts()
+        list_chromecasts(chromecasts)
+        sys.exit(0)
+    if args.play:
+        if not (args.target and args.streams):
+            print('\nError: Both a target and stream must be specified when playing.\n')
+            parser.print_help()
+            sys.exit(1)
+
+        volume_increase = args.volume_end > args.volume_start
+
+        if volume_increase:
+            volume = args.volume_start
+        else:
+            volume = args.volume_end
+
+        chromecasts = pychromecast.get_chromecasts()
+
+        if args.reset_volume_on_speakers:
+            """
+            Volume does not seem to always be propagated
+            recursively if the target is a group. To mitigate this
+            we need to manually for each device..
+            """
+            for device in args.reset_volume_on_speakers.split(','):
+                conn = get_device(chromecasts, device)
+                if conn:
+                    conn.set_volume(volume)
+                    print('Set volume to {} on {}.'.format(volume, device))
+                else:
+                    print('Device {} not found'.format(device))
+
+        device = get_device(chromecasts, args.target)
+        if not device:
+            print('Device "{}" not found'.format(args.target))
+            sys.exit(1)
+
+        stream = pick_stream(args.streams.split(','))
+        if not stream:
+            print('No valid stream found')
+
+        # Set the volume for the device.
+        volume = device.set_volume(volume)
+        print('Set initial volume to {} on {}.'.format(volume, args.target))
+
+        print('Starting stream...')
+        stream = send_stream(device, stream)
+
+        step = 0
+        while step < args.volume_intervals:
+            sleep(args.timer / args.volume_intervals)
+            adjustment = (args.volume_end - args.volume_start)/args.volume_intervals
+
+            if volume_increase:
+                volume += adjustment
+            else:
+                volume -= adjustment
+
+            print('Adjusting volume to {}.'.format(round(volume, 3)))
+            device.set_volume(volume)
+            step += 1
+
+        stream.stop()
+        print('Time up. Exiting.')
+
     else:
-        volume = VOLUME_MAX
+        parser.print_help()
 
-    # Set base volume twice as it appears to not 
-    # always take on the first attempt.
-    volume = device.set_volume(volume)
-    sleep(1)
-    volume = device.set_volume(volume)
-
-    print('Setting initial volume to "{}"'.format(volume))
-
-    print('Starting stream...')
-    stream = send_stream(device, stream)
-    volume_control(device, volume)
-
-    stream.stop()
-    print('Time up. Exiting.')
 
 if __name__ == '__main__':
     main()
