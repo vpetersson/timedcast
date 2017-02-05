@@ -82,9 +82,9 @@ def main():
 
     parser.add_argument(
         "--volume_end",
-        help="The end volume. Default is 0.4",
+        help="The end volume. Default is 0.3",
         type=int,
-        default=0.4,
+        default=0.3,
     )
 
     parser.add_argument(

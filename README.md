@@ -2,9 +2,11 @@
 
 A tool for scheduling audio playback for Chromecast and Chromecast Audio. The primary goal was to create an alarm clock that starts to stream music to a Chromecast (or group of Chromecasts) at a set hour using a simple cronjob.
 
+I personally run this on a Raspberry Pi, which wakes me up to gentle piano music at 7:15 AM every morning.
+
 Features:
-* Automatically connect to a defined Chromecast
-* Randomly picks an audio stream (configurable)
+* Automatically connect to the Chromecast(s)
+* Randomly picks an audio stream. You can find loads of feeds at [Shoutcast](http://shoutcast.com/).
 * Starts at a low volume and gradually increases the volume
 * Stops playing after after a set duration
 
